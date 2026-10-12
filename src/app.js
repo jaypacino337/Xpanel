@@ -23,7 +23,12 @@ function page(title, message) {
 export function createApp({ db, x, config, accounts, posts, inbox, metrics, media, users, ai }) {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 'loopback');
+  app.set('trust proxy', config.trustProxy ?? 'loopback');
+
+  app.get('/healthz', (req, res) => {
+    db.prepare('SELECT 1').get();
+    res.json({ ok: true });
+  });
   app.use('/api/media', express.raw({ type: MEDIA_TYPES, limit: '15mb' }));
   app.use(express.json({ limit: '2mb' }));
 

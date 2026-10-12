@@ -23,14 +23,31 @@ export function createAccountService({ db, x, cipher, config }) {
     audit(db, 'account.reauth_required', `@${account.username}: ${reason}`);
   }
 
-  async function refresh(account) {
+  // X rotates refresh tokens: each one works once. Jobs for the same account run in parallel, so
+  // refreshes are shared per account, and a token someone else already replaced is not refreshed again.
+  const refreshing = new Map();
+  function refresh(account) {
+    if (!refreshing.has(account.id)) {
+      refreshing.set(account.id, doRefresh(account.id, account.access_token_enc).finally(() => refreshing.delete(account.id)));
+    }
+    return refreshing.get(account.id);
+  }
+
+  async function doRefresh(accountId, staleTokenEnc) {
+    const account = getAccount(accountId);
+    if (!account) throw new AccountUnavailableError('Account not found');
+    if (account.access_token_enc !== staleTokenEnc && account.expires_at > Date.now() + 60_000) return account;
     const rt = cipher.decrypt(account.refresh_token_enc);
     if (!rt) { markReauth(account, 'no refresh token'); throw new AccountUnavailableError('Account needs to be reconnected'); }
     try {
       saveTokens(account.id, await x.refresh(rt));
     } catch (err) {
-      markReauth(account, err.message);
-      throw new AccountUnavailableError('Account needs to be reconnected');
+      // 400/401 means X rejected the grant (revoked or expired); anything else is temporary.
+      if (err.status === 400 || err.status === 401) {
+        markReauth(account, err.message);
+        throw new AccountUnavailableError('Account needs to be reconnected');
+      }
+      throw err;
     }
     return getAccount(account.id);
   }

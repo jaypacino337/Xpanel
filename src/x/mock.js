@@ -8,6 +8,8 @@ export function createMockX({ redirectUri }) {
   const users = new Map(); // token -> user
   const posts = new Map(); // id -> { authorId, text, replyTo, mediaIds }
   const uploads = new Map();
+  const usedRefresh = new Set();
+  let refreshCount = 0;
   let userCount = 0;
 
   function userFor(token) {
@@ -20,6 +22,7 @@ export function createMockX({ redirectUri }) {
     mock: true,
     posts,
     uploads,
+    get refreshCount() { return refreshCount; },
 
     authorizeUrl({ state }) {
       // Skip X's consent screen and come straight back with a fake code.
@@ -33,9 +36,16 @@ export function createMockX({ redirectUri }) {
       return { access_token: token, refresh_token: `mock-rt-${token}`, expires_in: 7200, scope: 'tweet.read tweet.write users.read media.write offline.access' };
     },
 
+    // Like X, each refresh token works once and replaces the old access token.
     async refresh(refreshToken) {
       const old = refreshToken.replace(/^mock-rt-/, '');
-      const user = userFor(old);
+      const user = users.get(old);
+      if (!user || usedRefresh.has(refreshToken)) {
+        throw Object.assign(new Error('mock: invalid_request (refresh token already used)'), { status: 400 });
+      }
+      usedRefresh.add(refreshToken);
+      users.delete(old);
+      refreshCount += 1;
       const token = `mock-at-${crypto.randomUUID()}`;
       users.set(token, user);
       return { access_token: token, refresh_token: `mock-rt-${token}`, expires_in: 7200 };

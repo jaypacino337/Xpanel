@@ -1,0 +1,17 @@
+# docker compose up -d   (run "npm run setup" first to create .env)
+services:
+  xpanel:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /app/data/xpanel.db
+      # Requests arrive from the reverse proxy on the Docker network.
+      TRUST_PROXY: "1"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - xpanel-data:/app/data
+
+volumes:
+  xpanel-data:

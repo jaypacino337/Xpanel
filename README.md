@@ -46,17 +46,32 @@ Open http://localhost:3000 and sign in as `admin` with that password. In mock mo
 
 ## Running against X
 
-1. On [developer.x.com](https://developer.x.com), create a project and app. Under **User authentication settings**, turn on **OAuth 2.0**, set the type to **Web App**, and add the callback URL `BASE_URL/oauth/callback` (for example `https://panel.example.com/oauth/callback`).
-2. Copy `.env.example` to `.env` and fill it in:
+1. On [developer.x.com](https://developer.x.com), create a project and app. Under **User authentication settings**, turn on **OAuth 2.0**, set the type to **Web App**, and note the Client ID and Client Secret.
+2. Run the setup command. It asks for your public URL, X keys, account limit, and optional AI and alert settings, writes `.env` with freshly generated secrets, and prints the callback URL to add on developer.x.com:
    ```bash
-   cp .env.example .env
-   openssl rand -hex 32   # SESSION_SECRET
-   openssl rand -hex 32   # TOKEN_ENC_KEY
+   npm install
+   npm run setup
    ```
-   Set `X_CLIENT_ID`, `X_CLIENT_SECRET`, `BASE_URL`, `PANEL_PASSWORD`, `MAX_ACCOUNTS` (up to 100), `DEFAULT_TIMEZONE`, and `X_MOCK=0`. Optionally set `ANTHROPIC_API_KEY` for AI drafting and `ALERT_WEBHOOK_URL` for alerts.
-3. `npm start`, then sign in as `admin` with `PANEL_PASSWORD`. That password only seeds the first admin; change it under **Team**, and add your team there.
+   Running it again keeps your existing secrets. (You can also copy `.env.example` to `.env` and fill it in by hand.)
+3. Add the printed callback URL (`BASE_URL/oauth/callback`) to your X app's OAuth 2.0 settings.
+4. `npm start`, then sign in as `admin` with the password from setup. Change it under **Team** and add your team there.
 
-Use HTTPS in production (put the panel behind a reverse proxy such as Caddy or nginx); the session cookie is marked `Secure` when `BASE_URL` starts with `https://`. Back up `data/` (database and uploaded images) and keep `TOKEN_ENC_KEY` safe: without it the stored tokens cannot be decrypted, and every client would have to reconnect.
+### Deploying
+
+The panel needs HTTPS in production, because X requires an HTTPS callback for live apps and the session cookie is marked `Secure` when `BASE_URL` starts with `https://`. Put it behind a reverse proxy such as Caddy or nginx.
+
+**With Docker:**
+
+```bash
+npm run setup          # creates .env
+docker compose up -d   # builds the image and starts it on 127.0.0.1:3000
+```
+
+Point your reverse proxy at `127.0.0.1:3000`. The database and uploaded images live in the `xpanel-data` volume. `/healthz` reports whether the panel is up.
+
+**Without Docker:** run `npm start` under a process manager (systemd, pm2) with the reverse proxy on the same machine. Set `TRUST_PROXY` if the proxy runs elsewhere, so login rate limiting sees real client IPs.
+
+**Backups:** back up `data/` (database and images) and `.env`. Keep `TOKEN_ENC_KEY` safe: without it the stored tokens cannot be decrypted, and every client would have to reconnect.
 
 Accounts connected with an earlier version of XPanel don't have the `media.write` permission. Send them a fresh connect link before posting images from those accounts.
 
@@ -89,7 +104,7 @@ npm test     # node:test suite, runs against the mock X client and a fake AI cli
 
 ```
 src/
-  server.js          entry point, wires services together
+  server.js          entry point, wires services together, graceful shutdown
   app.js             HTTP routes, sessions and roles, OAuth connect/callback
   scheduler.js       background jobs: publish, poll mentions, refresh metrics, clean up images
   alerts.js          Slack/Discord webhook alerts
@@ -98,4 +113,6 @@ src/
   x/api.js           X API v2 client      x/mock.js  fake client for dev and tests
   db.js              SQLite schema (node:sqlite), upgrades older databases in place
 public/              the panel UI (plain HTML/CSS/JS, no build step)
+scripts/setup.js     interactive .env generator
+test/                API, service, and X client tests
 ```

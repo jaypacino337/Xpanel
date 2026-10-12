@@ -426,3 +426,32 @@ test('publishing runs accounts in parallel', async () => {
     assert.equal(t.posts.list({ status: 'posted' }).length, 6);
   } finally { t.close(); }
 });
+
+test('parallel jobs share one token refresh (X refresh tokens work once)', async () => {
+  const t = await signedIn();
+  try {
+    await t.connectAccount(t.clientId);
+    const acc = firstAccount(t);
+    t.db.prepare('UPDATE accounts SET expires_at = 0').run();
+    const before = t.x.refreshCount;
+    await Promise.all([
+      t.inbox.pollAll(),
+      t.metrics.refreshAll(),
+      t.accounts.withToken(acc.id, 'me', (token) => t.x.me(token)),
+    ]);
+    assert.equal(t.x.refreshCount - before, 1);
+    assert.equal(firstAccount(t).status, 'active');
+  } finally { t.close(); }
+});
+
+test('a network error while refreshing does not mark the account for reconnecting', async () => {
+  const t = await signedIn();
+  try {
+    await t.connectAccount(t.clientId);
+    const acc = firstAccount(t);
+    t.db.prepare('UPDATE accounts SET expires_at = 0').run();
+    t.x.refresh = async () => { throw new TypeError('fetch failed'); };
+    await assert.rejects(t.accounts.withToken(acc.id, 'me', (token) => t.x.me(token)), /fetch failed/);
+    assert.equal(firstAccount(t).status, 'active');
+  } finally { t.close(); }
+});

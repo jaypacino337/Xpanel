@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { loadConfig } from './config.js';
 import { openDb } from './db.js';
 import { makeCipher } from './crypto.js';
@@ -32,13 +33,26 @@ export function buildServices(config, { db = openDb(config.dbPath), x, aiClient 
   return { db, x, config, accounts, media, posts, inbox, metrics, users, ai };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = loadConfig();
   const services = buildServices(config);
-  startScheduler(services);
-  createApp(services).listen(config.port, () => {
+  const stopScheduler = startScheduler(services);
+  const server = createApp(services).listen(config.port, () => {
     console.log(`XPanel on ${config.baseUrl}${config.mock ? ' (mock X API: no real posts are made)' : ''}`);
     console.log(`OAuth callback URL to register on developer.x.com: ${config.baseUrl}/oauth/callback`);
     console.log(`Up to ${config.maxAccounts} accounts · AI drafting ${services.ai.enabled ? 'on' : 'off'} · alerts ${config.alertWebhookUrl ? 'on' : 'off'}`);
   });
+
+  // Stop taking work, let in-flight requests finish, then close the database.
+  const shutdown = (signal) => {
+    console.log(`${signal} received, shutting down`);
+    stopScheduler();
+    server.close(() => {
+      services.db.close();
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }

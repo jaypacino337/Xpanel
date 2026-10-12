@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/server.js",
     "dev": "X_MOCK=1 node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --watch src/server.js",
+    "setup": "node scripts/setup.js",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.js\""
   },
   "dependencies": {

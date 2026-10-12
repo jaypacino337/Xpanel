@@ -11,6 +11,14 @@ function int(env, name, fallback) {
   return n;
 }
 
+// Express "trust proxy": a hop count, true/false, or a list like "loopback, 10.0.0.0/8".
+function parseTrustProxy(value) {
+  if (value === undefined || value === '') return 'loopback';
+  if (/^\d+$/.test(value)) return Number(value);
+  if (value === 'true' || value === 'false') return value === 'true';
+  return value;
+}
+
 export function loadConfig(env = process.env) {
   const mock = env.X_MOCK === '1' || env.X_MOCK === 'true';
   const port = int(env, 'PORT', 3000);
@@ -30,6 +38,7 @@ export function loadConfig(env = process.env) {
     alertWebhookUrl: env.ALERT_WEBHOOK_URL || '',
     aiEnabled: Boolean(env.ANTHROPIC_API_KEY),
     concurrency: Math.max(1, int(env, 'X_CONCURRENCY', 5)),
+    trustProxy: parseTrustProxy(env.TRUST_PROXY),
     dailyPostCap: int(env, 'DAILY_POST_CAP', 25),
     mentionsPollMinutes: int(env, 'MENTIONS_POLL_MINUTES', 15),
     metricsPollMinutes: int(env, 'METRICS_POLL_MINUTES', 60),
@@ -46,7 +55,7 @@ export function loadConfig(env = process.env) {
     if (!config.tokenEncKey) missing.push('TOKEN_ENC_KEY');
     if (!config.xClientId) missing.push('X_CLIENT_ID');
   }
-  if (missing.length) throw new Error(`Missing required settings: ${missing.join(', ')} (see .env.example)`);
+  if (missing.length) throw new Error(`Missing required settings: ${missing.join(', ')} (run "npm run setup" or see .env.example)`);
   if (!isValidTimeZone(config.defaultTimezone)) throw new Error(`DEFAULT_TIMEZONE "${config.defaultTimezone}" is not a valid IANA time zone`);
   if (!/^[0-9a-f]{64}$/i.test(config.tokenEncKey)) throw new Error('TOKEN_ENC_KEY must be 64 hex characters');
   return config;
