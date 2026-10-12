@@ -1,14 +1,10 @@
-import { audit } from '../db.js';
+import { audit, tx } from '../db.js';
 import { XApiError } from '../x/api.js';
+import { isValidTimeZone } from '../lib/time.js';
 
-export class RateLimitedError extends Error {
-  constructor(endpoint, resetAt) {
-    super(`Rate limited on ${endpoint} until ${new Date(resetAt).toISOString()}`);
-    this.resetAt = resetAt;
-  }
-}
+import { AccountUnavailableError, RateLimitedError, ValidationError } from '../lib/errors.js';
 
-export class AccountUnavailableError extends Error {}
+export { AccountUnavailableError, RateLimitedError };
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -89,9 +85,52 @@ export function createAccountService({ db, x, cipher, config }) {
     return Math.max(0, config.dailyPostCap - sentInLastDay(accountId));
   }
 
-  function logSent(accountId, tweetId, kind) {
-    db.prepare('INSERT INTO sent_log (account_id, tweet_id, kind, sent_at) VALUES (?, ?, ?, ?)')
-      .run(accountId, tweetId, kind, Date.now());
+  function logSent(accountId, tweetId, kind, text) {
+    db.prepare('INSERT INTO sent_log (account_id, tweet_id, kind, text, sent_at) VALUES (?, ?, ?, ?, ?)')
+      .run(accountId, tweetId, kind, text ?? null, Date.now());
+  }
+
+  // True when an X user is one of the accounts managed here (used to stop accounts engaging with each other).
+  function isManagedUser(xUserId) {
+    return Boolean(xUserId && db.prepare('SELECT 1 FROM accounts WHERE x_user_id = ?').get(String(xUserId)));
+  }
+
+  const timezoneOf = (account) => account.timezone || config.defaultTimezone;
+
+  function getSlots(accountId) {
+    return db.prepare('SELECT weekday, minute FROM slots WHERE account_id = ? ORDER BY weekday, minute').all(accountId);
+  }
+
+  function getSettings(accountId) {
+    const account = getAccount(accountId);
+    if (!account) return null;
+    return { timezone: timezoneOf(account), voice: account.voice || '', slots: getSlots(accountId) };
+  }
+
+  // slots: [{ weekday: 0-6, minute: 0-1439 }]
+  function updateSettings(accountId, { timezone, voice, slots }) {
+    const account = getAccount(accountId);
+    if (!account) throw new AccountUnavailableError('Account not found');
+    if (timezone !== undefined && !isValidTimeZone(timezone)) throw new ValidationError(`Unknown time zone "${timezone}"`);
+    if (voice !== undefined && String(voice).length > 2000) throw new ValidationError('Brand voice notes are limited to 2000 characters');
+    if (slots !== undefined) {
+      if (!Array.isArray(slots) || slots.length > 200) throw new ValidationError('Up to 200 posting slots per account');
+      for (const sl of slots) {
+        if (!Number.isInteger(sl.weekday) || sl.weekday < 0 || sl.weekday > 6
+          || !Number.isInteger(sl.minute) || sl.minute < 0 || sl.minute > 1439) throw new ValidationError('Invalid posting slot');
+      }
+    }
+    tx(db, () => {
+      if (timezone !== undefined) db.prepare('UPDATE accounts SET timezone = ? WHERE id = ?').run(timezone, accountId);
+      if (voice !== undefined) db.prepare('UPDATE accounts SET voice = ? WHERE id = ?').run(String(voice).trim() || null, accountId);
+      if (slots !== undefined) {
+        db.prepare('DELETE FROM slots WHERE account_id = ?').run(accountId);
+        const ins = db.prepare('INSERT OR IGNORE INTO slots (account_id, weekday, minute) VALUES (?, ?, ?)');
+        for (const sl of slots) ins.run(accountId, sl.weekday, sl.minute);
+      }
+      audit(db, 'account.settings', `@${account.username}`);
+    });
+    return getSettings(accountId);
   }
 
   function countAccounts() {
@@ -113,9 +152,9 @@ export function createAccountService({ db, x, cipher, config }) {
       db.prepare('UPDATE accounts SET username = ?, name = ?, client_id = ?, scopes = ? WHERE id = ?')
         .run(me.username, me.name, clientId, tok.scope || null, id);
     } else {
-      id = Number(db.prepare(`INSERT INTO accounts (client_id, x_user_id, username, name, scopes, created_at)
-                              VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(clientId, me.id, me.username, me.name, tok.scope || null, Date.now()).lastInsertRowid);
+      id = Number(db.prepare(`INSERT INTO accounts (client_id, x_user_id, username, name, scopes, timezone, created_at)
+                              VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(clientId, me.id, me.username, me.name, tok.scope || null, config.defaultTimezone, Date.now()).lastInsertRowid);
     }
     saveTokens(id, tok);
     audit(db, existing ? 'account.reconnected' : 'account.connected', `@${me.username}`);
@@ -134,5 +173,6 @@ export function createAccountService({ db, x, cipher, config }) {
 
   return {
     getAccount, withToken, remainingToday, logSent, countAccounts, connectFromCode, disconnect,
+    isManagedUser, timezoneOf, getSlots, getSettings, updateSettings,
   };
 }

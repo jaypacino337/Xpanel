@@ -2,7 +2,7 @@
 const API = 'https://api.x.com/2';
 const AUTHORIZE_URL = 'https://x.com/i/oauth2/authorize';
 
-export const SCOPES = ['tweet.read', 'tweet.write', 'users.read', 'offline.access'];
+export const SCOPES = ['tweet.read', 'tweet.write', 'users.read', 'media.write', 'offline.access'];
 
 export class XApiError extends Error {
   constructor(status, body, resetAt) {
@@ -24,13 +24,14 @@ function rateLimitFrom(res) {
 }
 
 export function createRealX({ clientId, clientSecret, redirectUri, fetchImpl = fetch }) {
-  async function request(method, url, { token, json, form, basic } = {}) {
+  async function request(method, url, { token, json, form, multipart, basic } = {}) {
     const headers = {};
     if (token) headers.authorization = `Bearer ${token}`;
     if (basic) headers.authorization = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`;
     let body;
     if (json) { headers['content-type'] = 'application/json'; body = JSON.stringify(json); }
     if (form) { headers['content-type'] = 'application/x-www-form-urlencoded'; body = new URLSearchParams(form); }
+    if (multipart) body = multipart; // fetch sets the multipart boundary header
     const res = await fetchImpl(url, { method, headers, body });
     const rateLimit = rateLimitFrom(res);
     const text = await res.text();
@@ -84,9 +85,18 @@ export function createRealX({ clientId, clientSecret, redirectUri, fetchImpl = f
       return data.data; // { id, name, username }
     },
 
-    async createPost(token, { text, replyTo }) {
+    async uploadMedia(token, { data, mime }) {
+      const form = new FormData();
+      form.append('media', new Blob([data], { type: mime }), 'upload');
+      form.append('media_category', mime === 'image/gif' ? 'tweet_gif' : 'tweet_image');
+      const { data: res, rateLimit } = await request('POST', `${API}/media/upload`, { token, multipart: form });
+      return { id: res.data.id, rateLimit };
+    },
+
+    async createPost(token, { text, replyTo, mediaIds }) {
       const json = { text };
       if (replyTo) json.reply = { in_reply_to_tweet_id: replyTo };
+      if (mediaIds?.length) json.media = { media_ids: mediaIds };
       const { data, rateLimit } = await request('POST', `${API}/tweets`, { token, json });
       return { id: data.data.id, rateLimit };
     },

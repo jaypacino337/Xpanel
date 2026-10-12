@@ -1,9 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync } from 'node:sqlite';
+
+// Carries the signed-in user through a request so audit entries record who did what.
+export const requestContext = new AsyncLocalStorage();
 
 // All timestamps are epoch milliseconds.
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  pass_hash TEXT NOT NULL,
+  role TEXT NOT NULL,           -- admin | editor
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -36,6 +48,25 @@ CREATE TABLE IF NOT EXISTS accounts (
   scopes TEXT,
   status TEXT NOT NULL DEFAULT 'active', -- active | reauth_required
   last_mention_id TEXT,
+  timezone TEXT,
+  voice TEXT,                   -- brand voice notes used for AI drafts
+  last_mentions_poll_at INTEGER,
+  last_metrics_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS slots (
+  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  weekday INTEGER NOT NULL,     -- 0 = Sunday
+  minute INTEGER NOT NULL,      -- minutes after local midnight
+  PRIMARY KEY (account_id, weekday, minute)
+);
+
+CREATE TABLE IF NOT EXISTS media (
+  id TEXT PRIMARY KEY,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  path TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
 
@@ -48,6 +79,7 @@ CREATE TABLE IF NOT EXISTS posts (
   next_attempt_at INTEGER,
   posted_at INTEGER,
   tweet_ids TEXT,               -- JSON array
+  media TEXT,                   -- JSON array of media ids, attached to the first part
   error TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -71,6 +103,7 @@ CREATE TABLE IF NOT EXISTS sent_log (
   account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   tweet_id TEXT NOT NULL,
   kind TEXT NOT NULL,           -- post | reply
+  text TEXT,
   sent_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sent_log_account ON sent_log(account_id, sent_at);
@@ -99,22 +132,42 @@ CREATE TABLE IF NOT EXISTS reply_templates (
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY,
   at INTEGER NOT NULL,
+  user TEXT,
   action TEXT NOT NULL,
   detail TEXT
 );
 `;
 
+// Columns added after the first release; added in place to databases created by older versions.
+const ADDED_COLUMNS = [
+  ['accounts', 'timezone', 'TEXT'],
+  ['accounts', 'voice', 'TEXT'],
+  ['accounts', 'last_mentions_poll_at', 'INTEGER'],
+  ['accounts', 'last_metrics_at', 'INTEGER'],
+  ['posts', 'media', 'TEXT'],
+  ['sent_log', 'text', 'TEXT'],
+  ['audit_log', 'user', 'TEXT'],
+];
+
 export function openDb(file) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
-  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
+  for (const [table, column, type] of ADDED_COLUMNS) {
+    const has = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+    if (!has) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
   return db;
 }
 
+// db.onAudit, when set, is called for every entry (used for alerts).
 export function audit(db, action, detail) {
-  db.prepare('INSERT INTO audit_log (at, action, detail) VALUES (?, ?, ?)')
-    .run(Date.now(), action, detail == null ? null : String(detail));
+  const user = requestContext.getStore()?.username ?? 'system';
+  const text = detail == null ? null : String(detail);
+  db.prepare('INSERT INTO audit_log (at, user, action, detail) VALUES (?, ?, ?, ?)')
+    .run(Date.now(), user, action, text);
+  db.onAudit?.(action, text, user);
 }
 
 export function tx(db, fn) {

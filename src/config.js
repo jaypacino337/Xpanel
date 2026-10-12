@@ -1,7 +1,11 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
+import { isValidTimeZone } from './lib/time.js';
 
-function int(name, fallback) {
-  const v = process.env[name];
+export const ACCOUNT_LIMIT = 100;
+
+function int(env, name, fallback) {
+  const v = env[name];
   const n = v === undefined || v === '' ? fallback : Number.parseInt(v, 10);
   if (!Number.isFinite(n)) throw new Error(`${name} must be an integer`);
   return n;
@@ -9,7 +13,7 @@ function int(name, fallback) {
 
 export function loadConfig(env = process.env) {
   const mock = env.X_MOCK === '1' || env.X_MOCK === 'true';
-  const port = int('PORT', 3000);
+  const port = int(env, 'PORT', 3000);
   const config = {
     port,
     baseUrl: (env.BASE_URL || `http://localhost:${port}`).replace(/\/$/, ''),
@@ -20,10 +24,15 @@ export function loadConfig(env = process.env) {
     xClientId: env.X_CLIENT_ID || '',
     xClientSecret: env.X_CLIENT_SECRET || '',
     mock,
-    maxAccounts: Math.min(int('MAX_ACCOUNTS', 10), 10),
-    dailyPostCap: int('DAILY_POST_CAP', 25),
-    mentionsPollMinutes: int('MENTIONS_POLL_MINUTES', 15),
-    metricsPollMinutes: int('METRICS_POLL_MINUTES', 60),
+    maxAccounts: Math.max(1, Math.min(int(env, 'MAX_ACCOUNTS', 10), ACCOUNT_LIMIT)),
+    defaultTimezone: env.DEFAULT_TIMEZONE || 'UTC',
+    mediaDir: env.MEDIA_DIR || path.join(path.dirname(env.DB_PATH || 'data/xpanel.db'), 'media'),
+    alertWebhookUrl: env.ALERT_WEBHOOK_URL || '',
+    aiEnabled: Boolean(env.ANTHROPIC_API_KEY),
+    concurrency: Math.max(1, int(env, 'X_CONCURRENCY', 5)),
+    dailyPostCap: int(env, 'DAILY_POST_CAP', 25),
+    mentionsPollMinutes: int(env, 'MENTIONS_POLL_MINUTES', 15),
+    metricsPollMinutes: int(env, 'METRICS_POLL_MINUTES', 60),
   };
 
   const missing = [];
@@ -38,6 +47,7 @@ export function loadConfig(env = process.env) {
     if (!config.xClientId) missing.push('X_CLIENT_ID');
   }
   if (missing.length) throw new Error(`Missing required settings: ${missing.join(', ')} (see .env.example)`);
+  if (!isValidTimeZone(config.defaultTimezone)) throw new Error(`DEFAULT_TIMEZONE "${config.defaultTimezone}" is not a valid IANA time zone`);
   if (!/^[0-9a-f]{64}$/i.test(config.tokenEncKey)) throw new Error('TOKEN_ENC_KEY must be 64 hex characters');
   return config;
 }

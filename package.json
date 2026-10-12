@@ -4,13 +4,16 @@
   "description": "Client account manager for X: official OAuth, scheduled posts with approvals, mention inbox, analytics.",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.9" },
+  "engines": {
+    "node": ">=22.9"
+  },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/server.js",
     "dev": "X_MOCK=1 node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --watch src/server.js",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.js\""
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "express": "^5.1.0"
   }
 }

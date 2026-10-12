@@ -12,6 +12,7 @@
     <form class="card narrow" id="login-form">
       <h1>XPanel</h1>
       <p class="muted">Client account manager for X</p>
+      <label>Username <input name="username" autocomplete="username" value="admin" required></label>
       <label>Password <input type="password" name="password" autocomplete="current-password" required autofocus></label>
       <button type="submit">Sign in</button>
       <p class="error" id="login-error"></p>
@@ -21,15 +22,19 @@
   <div id="shell" hidden>
     <nav class="sidebar">
       <div class="brand">XPanel</div>
-      <button data-tab="overview">Clients &amp; accounts</button>
+      <button data-tab="overview">Dashboard</button>
       <button data-tab="compose">Compose</button>
       <button data-tab="queue">Queue</button>
       <button data-tab="inbox">Inbox</button>
+      <button data-tab="schedules">Schedules</button>
+      <button data-tab="import">Bulk import</button>
       <button data-tab="templates">Reply templates</button>
       <button data-tab="analytics">Analytics</button>
+      <button data-tab="team">Team</button>
       <button data-tab="activity">Activity log</button>
       <div class="spacer"></div>
       <div id="mock-badge" class="badge warn" hidden>Mock mode: nothing is posted to X</div>
+      <div id="whoami" class="muted small"></div>
       <button id="logout" class="ghost">Sign out</button>
     </nav>
     <main id="view"></main>

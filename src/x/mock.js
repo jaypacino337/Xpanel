@@ -6,7 +6,8 @@ const nextId = () => String(seq++);
 
 export function createMockX({ redirectUri }) {
   const users = new Map(); // token -> user
-  const posts = new Map(); // id -> { authorId, text }
+  const posts = new Map(); // id -> { authorId, text, replyTo, mediaIds }
+  const uploads = new Map();
   let userCount = 0;
 
   function userFor(token) {
@@ -18,6 +19,7 @@ export function createMockX({ redirectUri }) {
   return {
     mock: true,
     posts,
+    uploads,
 
     authorizeUrl({ state }) {
       // Skip X's consent screen and come straight back with a fake code.
@@ -28,7 +30,7 @@ export function createMockX({ redirectUri }) {
       userCount += 1;
       const token = `mock-at-${crypto.randomUUID()}`;
       users.set(token, { id: nextId(), username: `demo_client_${userCount}`, name: `Demo Client ${userCount}` });
-      return { access_token: token, refresh_token: `mock-rt-${token}`, expires_in: 7200, scope: 'tweet.read tweet.write users.read offline.access' };
+      return { access_token: token, refresh_token: `mock-rt-${token}`, expires_in: 7200, scope: 'tweet.read tweet.write users.read media.write offline.access' };
     },
 
     async refresh(refreshToken) {
@@ -45,10 +47,17 @@ export function createMockX({ redirectUri }) {
       return userFor(token);
     },
 
-    async createPost(token, { text, replyTo }) {
+    async uploadMedia(token, { data, mime }) {
+      userFor(token);
+      const id = nextId();
+      uploads.set(id, { size: data.length, mime });
+      return { id, rateLimit: null };
+    },
+
+    async createPost(token, { text, replyTo, mediaIds }) {
       const user = userFor(token);
       const id = nextId();
-      posts.set(id, { authorId: user.id, text, replyTo: replyTo || null });
+      posts.set(id, { authorId: user.id, text, replyTo: replyTo || null, mediaIds: mediaIds || [] });
       return { id, rateLimit: null };
     },
 
