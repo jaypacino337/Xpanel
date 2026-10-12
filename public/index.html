@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>XPanel</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <section id="login" class="standalone" hidden>
+    <form class="card narrow" id="login-form">
+      <h1>XPanel</h1>
+      <p class="muted">Client account manager for X</p>
+      <label>Password <input type="password" name="password" autocomplete="current-password" required autofocus></label>
+      <button type="submit">Sign in</button>
+      <p class="error" id="login-error"></p>
+    </form>
+  </section>
+
+  <div id="shell" hidden>
+    <nav class="sidebar">
+      <div class="brand">XPanel</div>
+      <button data-tab="overview">Clients &amp; accounts</button>
+      <button data-tab="compose">Compose</button>
+      <button data-tab="queue">Queue</button>
+      <button data-tab="inbox">Inbox</button>
+      <button data-tab="templates">Reply templates</button>
+      <button data-tab="analytics">Analytics</button>
+      <button data-tab="activity">Activity log</button>
+      <div class="spacer"></div>
+      <div id="mock-badge" class="badge warn" hidden>Mock mode: nothing is posted to X</div>
+      <button id="logout" class="ghost">Sign out</button>
+    </nav>
+    <main id="view"></main>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
